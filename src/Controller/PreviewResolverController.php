@@ -82,6 +82,16 @@ class PreviewResolverController extends AbstractController
         $contentElementLabel = '' !== $contentElementType
             ? $this->resolveLabel($contentElementType, $this->translator)
             : '';
+        $newsId    = $pageData['newsId']  ?? null;
+        $newsAlias  = (string) ($pageData['newsAlias']  ?? '');
+        $newsTitle  = (string) ($pageData['newsTitle']  ?? '');
+
+        // When a content element belongs to a news record (ptable='tl_news'),
+        // the edit URL must use do=news instead of do=article.
+        $contentElementParentTable = '';
+        if (\is_int($contentElementId) && $contentElementId > 0 && \is_int($newsId) && $newsId > 0 && null === $articleId) {
+            $contentElementParentTable = 'tl_news';
+        }
 
         // Article-level selectors — used for DOM swap (clp:refresh) and as secondary
         // highlight target (outline + badge). Ordered by specificity.
@@ -98,12 +108,15 @@ class PreviewResolverController extends AbstractController
         }
 
         // Primary highlight selectors — CE selector when context is tl_content,
-        // otherwise same as articleSelectors. JS scrolls to the primary target.
-        // When CE + article differ, the frontend highlights both simultaneously:
-        // CE gets the solid blue outline, article gets dashed blue + badge.
-        $highlightSelectors = \is_int($contentElementId) && $contentElementId > 0
-            ? ['[data-contao-table="tl_content"][data-contao-id="' . $contentElementId . '"]']
-            : $articleSelectors;
+        // news selector when context is tl_news, otherwise same as articleSelectors.
+        // JS scrolls to the primary target.
+        if (\is_int($contentElementId) && $contentElementId > 0) {
+            $highlightSelectors = ['[data-contao-table="tl_content"][data-contao-id="' . $contentElementId . '"]'];
+        } elseif (\is_int($newsId) && $newsId > 0) {
+            $highlightSelectors = ['[data-contao-table="tl_news"][data-contao-id="' . $newsId . '"]'];
+        } else {
+            $highlightSelectors = $articleSelectors;
+        }
 
         return $this->json([
             'pageId'             => $pageData['pageId'],
@@ -113,6 +126,10 @@ class PreviewResolverController extends AbstractController
             'contentElementId'    => $contentElementId,
             'contentElementType'  => $contentElementType,
             'contentElementLabel' => $contentElementLabel,
+            'newsId'             => $newsId,
+            'newsAlias'          => $newsAlias,
+            'newsTitle'          => $newsTitle,
+            'contentElementParentTable' => $contentElementParentTable,
             'previewUrl'          => $previewUrl,
             'highlightSelectors' => $highlightSelectors,
             'articleSelectors'   => $articleSelectors,
@@ -124,6 +141,7 @@ class PreviewResolverController extends AbstractController
         return match ($do) {
             'page'    => 'tl_page',
             'article' => 'tl_article',
+            'news'    => 'tl_news',
             default   => '',
         };
     }

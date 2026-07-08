@@ -249,15 +249,19 @@
                 const beUrl = (sidebar && sidebar.dataset.clpBackendUrl) || '/contao';
 
                 if (e.data?.type === 'clp:edit') {
-                    const { table, id } = e.data;
+                    const { table, id, parentTable } = e.data;
                     if (!table || !id) return;
                     let params;
-                    if (table === 'tl_content') {
+                    if (table === 'tl_content' && parentTable === 'tl_news') {
+                        params = new URLSearchParams({ do: 'news', table: 'tl_content', act: 'edit', id: String(id) });
+                    } else if (table === 'tl_content') {
                         params = new URLSearchParams({ do: 'article', table: 'tl_content', act: 'edit', id: String(id) });
                     } else if (table === 'tl_article') {
                         params = new URLSearchParams({ do: 'article', table: 'tl_content', id: String(id) });
                     } else if (table === 'tl_module') {
                         params = new URLSearchParams({ do: 'themes', table: 'tl_module', act: 'edit', id: String(id) });
+                    } else if (table === 'tl_news') {
+                        params = new URLSearchParams({ do: 'news', table: 'tl_news', act: 'edit', id: String(id) });
                     } else {
                         // Any other (custom child) table: reuse the current backend
                         // module, falling back to a table-derived guess. Standard
@@ -422,6 +426,19 @@
             return { table: 'tl_page', id };
         }
 
+        if (doV === 'news' && tbl === 'tl_content' && !act) {
+            // News article content element list view: id is the news article.
+            return { table: 'tl_news', id };
+        }
+
+        if (doV === 'news' && tbl === 'tl_news' && act === 'edit') {
+            return { table: 'tl_news', id };
+        }
+
+        if (doV === 'news' && id > 0) {
+            return { table: 'tl_news', id };
+        }
+
         if (tbl === 'tl_module' && act === 'edit' && id > 0) {
             return { table: 'tl_module', id };
         }
@@ -486,19 +503,21 @@
         // When called as a load event listener, behavior is an Event object — ignore it.
         const b = (behavior === 'instant' || behavior === 'smooth') ? behavior : 'smooth';
         const isCe = currentContext?.table === 'tl_content';
+        const isNews = currentContext?.table === 'tl_news';
         // CE label: DCA label or raw type, always uppercase (e.g. "ICON LISTE", "TEXT")
         const ceLabel = isCe
             ? (currentContentElementLabel || currentContentElementType || '').toUpperCase()
             : '';
         // Article label: always just "ARTIKEL"
         const articleLabel = 'ARTIKEL';
+        const newsLabel = 'NACHRICHT';
         try {
             frame.contentWindow.postMessage({
                 type:             'clp:highlight',
                 selectors:        highlightSelectors,
                 articleSelectors,
                 scrollBehavior:   b,
-                label:            isCe ? ceLabel : articleLabel,
+                label:            isCe ? ceLabel : (isNews ? newsLabel : articleLabel),
                 articleLabel,
                 articleId:        currentArticleId,
                 contentElementId: isCe ? currentContext?.id : null,
