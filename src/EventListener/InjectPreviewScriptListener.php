@@ -71,6 +71,9 @@ class InjectPreviewScriptListener
 .clp-badge-sep{display:inline-block;width:1px;height:12px;background:rgba(255,255,255,.3);margin:0 2px;flex-shrink:0;align-self:center}
 .clp-badge-action{all:unset;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.75;transition:opacity .15s;pointer-events:auto;padding:5px;margin:-5px -2px;line-height:1}
 .clp-badge-action:hover{opacity:1}
+/* Box model lines — horizontal ones span full doc width, vertical ones span full doc height */
+.clp-bm-h{position:absolute;left:0;right:0;height:1px;pointer-events:none;display:none}
+.clp-bm-v{position:absolute;top:0;bottom:0;width:1px;pointer-events:none;display:none}
 </style>
 <script>(function(){
 // _el/_elCe  = data elements (carry data-contao-* attrs; used for hover exclusion + DOM swap).
@@ -184,6 +187,12 @@ window.addEventListener('message',function(e){
       });
     return;
   }
+  if(e.data.type==='clp:grid'){
+    document.body.classList.toggle('clp-grid-on',!!e.data.on);
+    if(!e.data.on&&typeof _bmHide==='function')_bmHide();
+    try{localStorage.setItem('clp_grid_overlay',e.data.on?'1':'0');}catch(_){}
+    return;
+  }
 });
 // Hover: fuchsia dashed outline + badge for any article/CE on the page.
 // _hoverEl = data element (for exclusion check + mouseout boundary).
@@ -215,6 +224,130 @@ document.addEventListener('mouseout',function(e){
   if(_hoverBadge&&rel&&(rel===_hoverBadge||_hoverBadge.contains(rel)))return;
   clpHoverClear();
 });
+// --- Box-model line overlay (active only when body.clp-grid-on) ---
+// 32 persistent 1px divs: 16 horizontal (full doc width) + 16 vertical (full doc height).
+// 4 layers × 4 sides × 2 orientations = 32. Colors: margin=amber, border=yellow,
+// padding=green, content=blue (Chrome DevTools palette).
+// Lines at identical positions are deduplicated (e.g. when margin=0).
+var _bmLines=[];
+var _bmEl=null;
+var _bmColors={margin:'rgba(246,140,60,.9)',border:'rgba(235,195,60,.9)',padding:'rgba(73,185,100,.9)',content:'rgba(66,135,245,.9)'};
+var _bmLayers=['margin','border','padding','content'];
+// Create 16 h-lines + 16 v-lines (4 layers × 4 sides each)
+(function(){
+  var zBase=2147483640;
+  for(var li=0;li<_bmLayers.length;li++){
+    var col=_bmColors[_bmLayers[li]];
+    for(var si=0;si<4;si++){
+      // horizontal line
+      var h=document.createElement('div');
+      h.className='clp-bm-h';
+      h.setAttribute('data-clp-bm','1');
+      h.style.cssText='position:absolute;left:0;right:0;height:1px;pointer-events:none;display:none;z-index:'+(zBase+li)+';background:'+col;
+      document.body.appendChild(h);
+      _bmLines.push({el:h,axis:'h',layer:_bmLayers[li],side:si});
+      // vertical line
+      var v=document.createElement('div');
+      v.className='clp-bm-v';
+      v.setAttribute('data-clp-bm','1');
+      v.style.cssText='position:absolute;top:0;bottom:0;width:1px;pointer-events:none;display:none;z-index:'+(zBase+li)+';background:'+col;
+      document.body.appendChild(v);
+      _bmLines.push({el:v,axis:'v',layer:_bmLayers[li],side:si});
+    }
+  }
+})();
+function _bmHide(){for(var i=0;i<_bmLines.length;i++)_bmLines[i].el.style.display='none';_bmEl=null;}
+function _bmCalcPositions(el){
+  var cs=getComputedStyle(el);
+  var r=el.getBoundingClientRect();
+  var isFixed=(cs.position==='fixed');
+  var sx=isFixed?0:window.scrollX,sy=isFixed?0:window.scrollY;
+  var mt=parseFloat(cs.marginTop)||0,mr=parseFloat(cs.marginRight)||0,
+      mb=parseFloat(cs.marginBottom)||0,ml=parseFloat(cs.marginLeft)||0;
+  var bt=parseFloat(cs.borderTopWidth)||0,brw=parseFloat(cs.borderRightWidth)||0,
+      bb=parseFloat(cs.borderBottomWidth)||0,blw=parseFloat(cs.borderLeftWidth)||0;
+  var pt=parseFloat(cs.paddingTop)||0,prw=parseFloat(cs.paddingRight)||0,
+      pb=parseFloat(cs.paddingBottom)||0,pl=parseFloat(cs.paddingLeft)||0;
+  var L=r.left+sx,T=r.top+sy,R=r.right+sx,B=r.bottom+sy;
+  // y positions for each layer's top and bottom line, x positions for left and right
+  // side 0=top/left, 1=bottom/right for h/v respectively (reuse 4 slots per layer)
+  return {
+    isFixed:isFixed,
+    // [layer][top-y, bottom-y, left-x, right-x]
+    margin:  [T-mt,   B+mb,   L-ml,   R+mr  ],
+    border:  [T,      B,      L,      R      ],
+    padding: [T+bt,   B-bb,   L+blw,  R-brw  ],
+    content: [T+bt+pt,B-bb-pb,L+blw+pl,R-brw-prw]
+  };
+}
+function _bmApply(el){
+  var skip=['HTML','BODY','SCRIPT','STYLE','HEAD','NOSCRIPT','SVG','PATH'];
+  if(skip.indexOf(el.tagName)!==-1){_bmHide();_bmEl=null;return;}
+  var cs=getComputedStyle(el);
+  if(cs.display==='none'||cs.display==='contents'||cs.display==='inline'||cs.visibility==='hidden'){_bmHide();_bmEl=null;return;}
+  _bmEl=el;
+  var pos=_bmCalcPositions(el);
+  var posStr=pos.isFixed?'fixed':'absolute';
+  // For each of the 32 lines, compute its pixel position and show/hide
+  // We iterate _bmLines in order: for each layer, we have 4 h and 4 v lines
+  // h lines use side 0,1,2,3 → top, bottom (sides 0+1 are meaningful; 2+3 are spares, hide)
+  // v lines use side 0,1,2,3 → left, right (sides 0+1 meaningful; 2+3 hide)
+  // Layout of _bmLines: margin-h0,margin-v0,margin-h1,margin-v1,...
+  // Reorganise: per layer we have 8 lines (h0,v0,h1,v1,h2,v2,h3,v3)
+  var shown={};// dedup by rounded position
+  var idx=0;
+  for(var li=0;li<_bmLayers.length;li++){
+    var layer=_bmLayers[li];
+    var coords=pos[layer];// [top-y, bottom-y, left-x, right-x]
+    // h0 = top line, h1 = bottom line, h2,h3 unused
+    // v0 = left line, v1 = right line, v2,v3 unused
+    var hYs=[coords[0],coords[1],null,null];
+    var vXs=[coords[2],coords[3],null,null];
+    for(var si=0;si<4;si++){
+      var hLine=_bmLines[idx++];
+      var vLine=_bmLines[idx++];
+      // horizontal
+      var hy=hYs[si];
+      if(hy!==null){
+        var hKey='h'+Math.round(hy);
+        if(!shown[hKey]){
+          shown[hKey]=true;
+          hLine.el.style.cssText='position:'+posStr+';left:0;right:0;height:1px;pointer-events:none;display:block;z-index:'+hLine.el.style.zIndex+';background:'+hLine.el.style.background+';top:'+hy+'px';
+        }else{hLine.el.style.display='none';}
+      }else{hLine.el.style.display='none';}
+      // vertical
+      var vx=vXs[si];
+      if(vx!==null){
+        var vKey='v'+Math.round(vx);
+        if(!shown[vKey]){
+          shown[vKey]=true;
+          vLine.el.style.cssText='position:'+posStr+';top:0;bottom:0;width:1px;pointer-events:none;display:block;z-index:'+vLine.el.style.zIndex+';background:'+vLine.el.style.background+';left:'+vx+'px';
+        }else{vLine.el.style.display='none';}
+      }else{vLine.el.style.display='none';}
+    }
+  }
+}
+document.addEventListener('mouseover',function(e){
+  if(!document.body.classList.contains('clp-grid-on'))return;
+  var el=e.target;
+  if(!el||el.getAttribute&&el.getAttribute('data-clp-bm'))return;
+  if(el===_bmEl)return;
+  _bmApply(el);
+},true);
+document.addEventListener('mouseout',function(e){
+  if(!document.body.classList.contains('clp-grid-on'))return;
+  var rel=e.relatedTarget;
+  if(!rel||rel===document.documentElement){_bmHide();return;}
+  if(rel.getAttribute&&rel.getAttribute('data-clp-bm'))return;
+  if(e.target&&e.target.contains&&e.target.contains(rel))return;
+  _bmHide();
+},true);
+// Reposition on scroll so lines follow the element
+window.addEventListener('scroll',function(){
+  if(!document.body.classList.contains('clp-grid-on'))return;
+  if(!_bmEl)return;
+  _bmApply(_bmEl);
+},{passive:true});
 // Keep ?_clp=1 on same-origin in-frame navigation so the preview script is
 // re-injected on every page the editor browses to. Without this, following an
 // internal link (or submitting a form) drops the marker/hover/refresh machinery
@@ -258,6 +391,8 @@ document.addEventListener('submit',function(e){
     f.setAttribute('action',u.toString());
   }
 },true);
+// Restore grid overlay state from localStorage on load.
+try{if(localStorage.getItem('clp_grid_overlay')==='1'){document.body.classList.add('clp-grid-on');}}catch(_){}
 })();</script>
 HTML;
     }

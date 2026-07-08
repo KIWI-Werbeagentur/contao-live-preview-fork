@@ -58,7 +58,7 @@
     // -------------------------------------------------------------------------
     // DOM references — acquired once; survive Turbo nav (sidebar lives on <html>)
     // -------------------------------------------------------------------------
-    let sidebar, frame, frameWrap, urlDisplay, vwInput, vhInput, zoomSelect;
+    let sidebar, frame, frameWrap, urlDisplay, vwInput, vhInput, zoomSelect, gridToggle;
 
     // -------------------------------------------------------------------------
     // Persistent state
@@ -146,6 +146,7 @@
         if (!vwInput)    vwInput    = document.getElementById('clp-vw');
         if (!vhInput)    vhInput    = document.getElementById('clp-vh');
         if (!zoomSelect) zoomSelect = document.getElementById('clp-zoom');
+        if (!gridToggle) gridToggle = document.getElementById('clp-grid-toggle');
 
         if (!sidebar || !frame) return;
 
@@ -889,6 +890,21 @@
             zoomSelect.addEventListener('change', () => {
                 localStorage.setItem(LS_ZOOM_KEY, zoomSelect.value);
                 applyViewport();
+            });
+        }
+
+        if (gridToggle) {
+            // Restore saved state
+            const gridOn = localStorage.getItem('clp_grid_overlay') === '1';
+            gridToggle.setAttribute('aria-pressed', String(gridOn));
+            gridToggle.classList.toggle('active', gridOn);
+
+            gridToggle.addEventListener('click', () => {
+                const on = gridToggle.getAttribute('aria-pressed') !== 'true';
+                gridToggle.setAttribute('aria-pressed', String(on));
+                gridToggle.classList.toggle('active', on);
+                localStorage.setItem('clp_grid_overlay', on ? '1' : '0');
+                try { frame?.contentWindow?.postMessage({ type: 'clp:grid', on }, '*'); } catch { }
             });
         }
 
