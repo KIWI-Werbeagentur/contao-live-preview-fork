@@ -117,10 +117,28 @@ function clpDeconflict(){
     _badge.style.top=((parseFloat(_badge.style.top)||0)+_badgeCe.offsetHeight+4)+'px';
   }
 }
-function _mkBadge(cls,lbl,table,editId){var b=document.createElement('div');b.className=cls;var s=document.createElement('span');s.textContent=lbl;b.appendChild(s);var btn=document.createElement('button');btn.type='button';btn.className='clp-badge-edit';btn.innerHTML=_editIcon;if(table&&editId){btn.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:edit',table:table,id:editId},'*');});}b.appendChild(btn);if(table==='tl_content'&&editId){var sep=document.createElement('span');sep.className='clp-badge-sep';b.appendChild(sep);var db=document.createElement('button');db.type='button';db.className='clp-badge-action';db.title='Element duplizieren';db.innerHTML=_dupIcon;db.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:duplicate',id:editId},'*');});b.appendChild(db);var nb=document.createElement('button');nb.type='button';nb.className='clp-badge-action';nb.title='Neues Element danach';nb.innerHTML=_addIcon;nb.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:insert-after',id:editId},'*');});b.appendChild(nb);}document.body.appendChild(b);return b;}
-function makeBadge(lbl,t,id){return _mkBadge('clp-badge',lbl,t,id);}
-function makeHoverBadge(lbl,t,id){return _mkBadge('clp-hover-badge',lbl,t,id);}
-function getCeLabel(el){if(el.dataset&&el.dataset.contaoLabel&&el.dataset.contaoLabel!==''){return el.dataset.contaoLabel.toUpperCase();}var cc=String(el.className||'').split(/\s+/);for(var i=0;i<cc.length;i++){if(cc[i].indexOf('ce_')===0){return cc[i].slice(3).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ').toUpperCase();}}return 'INHALTSELEMENT';}
+function _mkBadge(cls,lbl,table,editId,parentTable){var b=document.createElement('div');b.className=cls;var s=document.createElement('span');s.textContent=lbl;b.appendChild(s);var btn=document.createElement('button');btn.type='button';btn.className='clp-badge-edit';btn.innerHTML=_editIcon;if(table&&editId){btn.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:edit',table:table,id:editId,parentTable:parentTable||''},'*');});}b.appendChild(btn);if(table==='tl_content'&&editId){var sep=document.createElement('span');sep.className='clp-badge-sep';b.appendChild(sep);var db=document.createElement('button');db.type='button';db.className='clp-badge-action';db.title='Element duplizieren';db.innerHTML=_dupIcon;db.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:duplicate',id:editId,parentTable:parentTable||''},'*');});b.appendChild(db);var nb=document.createElement('button');nb.type='button';nb.className='clp-badge-action';nb.title='Neues Element danach';nb.innerHTML=_addIcon;nb.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:insert-after',id:editId,parentTable:parentTable||''},'*');});b.appendChild(nb);}document.body.appendChild(b);return b;}
+function makeBadge(lbl,t,id,pt){return _mkBadge('clp-badge',lbl,t,id,pt);}
+function makeHoverBadge(lbl,t,id,pt){return _mkBadge('clp-hover-badge',lbl,t,id,pt);}
+function getCeLabel(el){if(el.dataset&&el.dataset.contaoLabel&&el.dataset.contaoLabel!==''){return el.dataset.contaoLabel.toUpperCase();}var cc=String(el.className||'').split(/\s+/);for(var i=0;i<cc.length;i++){if(cc[i].indexOf('ce_')===0){return cc[i].slice(3).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ').toUpperCase();}if(cc[i].indexOf('content-')===0&&cc[i]!=='content-'){return cc[i].slice(8).replace(/-/g,' ').toUpperCase();}}return 'INHALTSELEMENT';}
+function getCeParentTable(el){
+  // TODO: Check and test with Opencode if below simplification works well.
+  /* START: Simplified below
+  // News content element → nested inside a [data-contao-table="tl_news"] wrapper.
+  var n=el.closest('[data-contao-table="tl_news"]');
+  if(n) return 'tl_news';
+  // Element group child → nested inside another [data-contao-table="tl_content"]
+  // wrapper (the group CE). Start from the parent so el.closest() doesn't match el
+  // itself. Deduced from DOM structure — no extra marker needed.
+  var p=el.parentElement;
+  if(p){var g=p.closest('[data-contao-table="tl_content"]');if(g) return 'tl_content';}
+  // Top-level article CE → ptable defaults to tl_article.
+  return '';
+  END: Simplified below */
+  var p=el.parentElement;
+  var m=p&&p.closest('[data-contao-table]');
+  return m?m.dataset.contaoTable:'';
+}
 function clpReposAll(){if(_badge&&_elVis)clpBadgePos(_badge,_elVis);if(_badgeCe&&_elCeVis)clpBadgePos(_badgeCe,_elCeVis);if(_hoverBadge&&_hoverElVis)clpBadgePos(_hoverBadge,_hoverElVis);clpDeconflict();}
 window.addEventListener('resize',clpReposAll,{passive:true});
 function highlight(el,bh,label,table,editId){
@@ -149,8 +167,8 @@ window.addEventListener('message',function(e){
       _el=aEl;_elVis=aElVis;aElVis.classList.add('clp-sel-secondary');
       // Prefer data-contao-label from the DOM — set by InjectContentElementMarkersListener
       // in fully-bootstrapped frontend context, so language files are always complete.
-      var lbl=getCeLabel(el)||e.data.label||'';if(lbl){_badgeCe=makeBadge(lbl,'tl_content',_contentElementId);clpBadgePos(_badgeCe,elVis);}
-      var albl=e.data.articleLabel||'';if(albl){_badge=makeBadge(albl,'tl_article',_articleId);_badge.style.zIndex='2147483646';clpBadgePos(_badge,aElVis);}
+      var lbl=getCeLabel(el)||e.data.label||'';if(lbl){_badgeCe=makeBadge(lbl,'tl_content',_contentElementId,getCeParentTable(el));clpBadgePos(_badgeCe,elVis);}
+      var albl=e.data.articleLabel||'';if(albl){_badge=makeBadge(albl,'tl_article',_articleId,'');_badge.style.zIndex='2147483646';clpBadgePos(_badge,aElVis);}
       clpDeconflict();
     }else if(el||aEl){
       var isCe=!!_contentElementId;
@@ -202,7 +220,7 @@ document.addEventListener('mouseover',function(e){
   var vis=clpVisTarget(el);
   _hoverEl=el;_hoverElVis=vis;
   vis.classList.add('clp-hover');
-  _hoverBadge=makeHoverBadge(lbl,table,id);
+  _hoverBadge=makeHoverBadge(lbl,table,id,getCeParentTable(el));
   clpBadgePos(_hoverBadge,vis);
 });
 // mouseout: _hoverEl (the data/container element) defines the boundary.

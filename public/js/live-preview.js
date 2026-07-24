@@ -277,7 +277,13 @@
                     if (!id) return;
                     const rt   = window.Contao?.request_token || window.Contao?.requestToken || '';
                     const doV  = new URLSearchParams(window.location.search).get('do') || 'article';
-                    const params = new URLSearchParams({ do: doV, table: 'tl_content', act: 'copy', mode: '4', id: String(id), rt });
+                    // tl_content is a parent view with sorting: core uses mode=1 (paste
+                    // after) + &ptable=tl_content when the CE's parent is itself a
+                    // tl_content (element group child). Without ptable, dynamicPtable
+                    // falls back to the DCA default 'tl_article' and the copy is rejected
+                    // ("not creatable") for group children. See DC_Table::findPtable().
+                    const params = new URLSearchParams({ do: doV, table: 'tl_content', act: 'copy', mode: '1', id: String(id), pid: String(id), rt });
+                    if (e.data.parentTable === 'tl_content') params.set('ptable', 'tl_content');
                     const url  = beUrl + '?' + params.toString();
                     if (window.Turbo) { Turbo.visit(url); } else { window.location.href = url; }
                 }
@@ -286,7 +292,10 @@
                     if (!id) return;
                     const rt   = window.Contao?.request_token || window.Contao?.requestToken || '';
                     const doV  = new URLSearchParams(window.location.search).get('do') || 'article';
-                    const params = new URLSearchParams({ do: doV, table: 'tl_content', act: 'create', mode: '4', pid: String(id), rt });
+                    // Same rationale as clp:duplicate: mode=1 (create after pid) +
+                    // &ptable=tl_content for group children.
+                    const params = new URLSearchParams({ do: doV, table: 'tl_content', act: 'create', mode: '1', pid: String(id), rt });
+                    if (e.data.parentTable === 'tl_content') params.set('ptable', 'tl_content');
                     const url  = beUrl + '?' + params.toString();
                     if (window.Turbo) { Turbo.visit(url); } else { window.location.href = url; }
                 }
