@@ -82,6 +82,9 @@
     // (outline + badge) when the primary highlight targets a content element.
     let articleSelectors = [];
 
+    // The numerical ID of the currently active content element.
+    // null when no content element is active.
+    let currentContentElementId = null
     // Contao type key of the currently selected content element (e.g. 'text', 'image').
     // null when context is tl_article or tl_page.
     let currentContentElementType  = null;
@@ -222,7 +225,7 @@
             // The flag is consumed in onPageReady after Contao redirects back to the list.
             // copy/copyAll: Contao creates the record immediately, then redirects to edit —
             //   the iframe must refresh to show the new element before the user saves it.
-            document.addEventListener('turbo:before-visit', (e) => {
+            document.addEventListener('turbo:before-fetch-request', (e) => {
                 try {
                     const act = new URL(e.detail.url).searchParams.get('act') || '';
                     if (['delete', 'deleteAll', 'copy', 'copyAll', 'cut', 'cutAll', 'toggle', 'toggleAll', 'paste', 'pasteAll'].includes(act)) {
@@ -241,6 +244,9 @@
                     pendingSave = false; // iframe confirmed DOM-swap complete
                     clearTimeout(refreshedTimeoutId);
                     refreshedTimeoutId = null;
+                    if (currentContext?.table === 'tl_content' || currentContentElementId) {
+                        sendHighlight();
+                    }
                     return;
                 }
                 // Canonical backend entry point — set server-side from the
@@ -529,10 +535,11 @@
             const data = await res.json();
 
             if (data.previewUrl) {
-                highlightSelectors        = data.highlightSelectors  || [];
-                articleSelectors          = data.articleSelectors    || [];
-                currentArticleId          = data.articleId           || null;
-                currentArticleTitle       = data.articleTitle        || null;
+                highlightSelectors         = data.highlightSelectors  || [];
+                articleSelectors           = data.articleSelectors    || [];
+                currentArticleId           = data.articleId           || null;
+                currentArticleTitle        = data.articleTitle        || null;
+                currentContentElementId    = data.contentElementId    || null;
                 currentContentElementType  = data.contentElementType  || null;
                 currentContentElementLabel = data.contentElementLabel || null;
                 if (urlDisplay) urlDisplay.textContent = data.previewUrl;
@@ -672,12 +679,13 @@
 
         try {
             localStorage.setItem(LS_SAVE_KEY, JSON.stringify({
-                articleId:             currentArticleId,
-                label:                 currentArticleTitle || '',
-                contentElementType:    currentContentElementType,
-                contentElementLabel:   currentContentElementLabel,
-                iframeUrl:             getCleanSrc(),
-                selectors:            highlightSelectors,
+                articleId:           currentArticleId,
+                label:               currentArticleTitle || '',
+                contentElementId:    currentContentElementId,
+                contentElementType:  currentContentElementType,
+                contentElementLabel: currentContentElementLabel,
+                iframeUrl:           getCleanSrc(),
+                selectors:           highlightSelectors,
                 articleSelectors,
                 scrollX,
                 scrollY,
@@ -709,12 +717,13 @@
             // (e.g. Contao redirect chain after "Save and Close") don't re-trigger.
             // clp:refreshed will call removeItem again — that's a harmless no-op.
             localStorage.removeItem(LS_SAVE_KEY);
-            if (state.articleId)                        currentArticleId          = state.articleId;
-            if (state.label !== undefined)              currentArticleTitle       = state.label || null;
-            if (state.contentElementType !== undefined)  currentContentElementType  = state.contentElementType  || null;
+            if (state.articleId)                        currentArticleId             = state.articleId;
+            if (state.label !== undefined)              currentArticleTitle          = state.label               || null;
+            if (state.contentElementId !== undefined)   currentContentElementId      = state.contentElementId    || null;
+            if (state.contentElementType !== undefined)  currentContentElementType   = state.contentElementType  || null;
             if (state.contentElementLabel !== undefined)  currentContentElementLabel = state.contentElementLabel || null;
-            if (state.selectors?.length)                highlightSelectors        = state.selectors;
-            if (state.articleSelectors?.length)         articleSelectors          = state.articleSelectors;
+            if (state.selectors?.length)                highlightSelectors           = state.selectors;
+            if (state.articleSelectors?.length)         articleSelectors             = state.articleSelectors;
             frameNeedsReload = true;
             scheduleRefresh(250);
             return;
@@ -725,12 +734,13 @@
 
         if (!state.iframeUrl) return;
 
-        currentArticleId          = state.articleId           || null;
-        currentArticleTitle       = state.label               || null;
+        currentArticleId           = state.articleId           || null;
+        currentArticleTitle        = state.label               || null;
+        currentContentElementId    = state.contentElementId    || null;
         currentContentElementType  = state.contentElementType  || null;
         currentContentElementLabel = state.contentElementLabel || null;
-        highlightSelectors        = state.selectors           || [];
-        articleSelectors          = state.articleSelectors    || [];
+        highlightSelectors         = state.selectors           || [];
+        articleSelectors           = state.articleSelectors    || [];
         frameNeedsReload   = false; // will be set true on load
 
         // Cache-bust so the browser doesn't serve a max-age=60 stale response.
