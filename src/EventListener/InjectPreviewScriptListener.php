@@ -63,13 +63,13 @@ class InjectPreviewScriptListener
 .clp-sel{outline:2px solid #0594ff!important;outline-offset:2px}
 .clp-sel-secondary{outline:2px dashed #0594ff!important;outline-offset:2px}
 .clp-hover{outline:2px dashed #d946ef!important;outline-offset:2px}
-.clp-badge,.clp-hover-badge{position:absolute;display:flex;align-items:center;gap:5px;color:#fff;font:700 11px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:7px 9px 8px 10px;border-radius:3px;white-space:nowrap;pointer-events:none}
+.clp-badge,.clp-hover-badge{position:absolute;display:flex;align-items:center;gap:5px;color:#fff;font:700 11px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:7px 9px 8px 10px;border-radius:3px;white-space:nowrap}
 .clp-badge{background:#0594ff;z-index:2147483647}
 .clp-hover-badge{background:#d946ef;z-index:2147483647}
-.clp-badge-edit{all:unset;display:flex;align-items:center;cursor:pointer;opacity:.75;transition:opacity .15s;pointer-events:auto;padding:8px;margin:-8px}
+.clp-badge-edit{all:unset;display:flex;align-items:center;cursor:pointer;opacity:.75;transition:opacity .15s;padding:8px;margin:-8px}
 .clp-badge-edit:hover{opacity:1}
 .clp-badge-sep{display:inline-block;width:1px;height:12px;background:rgba(255,255,255,.3);margin:0 2px;flex-shrink:0;align-self:center}
-.clp-badge-action{all:unset;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.75;transition:opacity .15s;pointer-events:auto;padding:5px;margin:-5px -2px;line-height:1}
+.clp-badge-action{all:unset;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.75;transition:opacity .15s;padding:5px;margin:-5px -2px;line-height:1}
 .clp-badge-action:hover{opacity:1}
 </style>
 <script>(function(){
@@ -96,14 +96,15 @@ function clpBadgePos(b,el){
   var r=el.getBoundingClientRect();
   var bh=b.offsetHeight||24;
   var above=r.height<bh+4;
+  var aboveGap=b.classList.contains('clp-hover-badge')?0:2;
   if(clpIsFixed(el)){
     b.style.position='fixed';
-    b.style.top=(above?Math.max(2,r.top-bh-2):r.top+2)+'px';
+    b.style.top=(above?Math.max(aboveGap,r.top-bh-aboveGap):r.top+2)+'px';
     b.style.left=(r.left+2)+'px';
   }else{
     b.style.position='';
     var t=window.scrollY+r.top;
-    b.style.top=(above?Math.max(window.scrollY+2,t-bh-2):t+2)+'px';
+    b.style.top=(above?Math.max(window.scrollY+aboveGap,t-bh-aboveGap):t+2)+'px';
     b.style.left=(window.scrollX+r.left+2)+'px';
   }
 }
