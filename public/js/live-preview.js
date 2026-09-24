@@ -119,6 +119,11 @@
     // Entry points
     // -------------------------------------------------------------------------
 
+    // Direct call: when the script loads mid-session (Turbo navigation from a page
+    // where it was not injected, e.g. template studio), every Turbo event of that
+    // navigation has already fired before this script executes. Idempotent, so on
+    // normal loads it just duplicates the first DOMContentLoaded call.
+    onPageReady();
     document.addEventListener('DOMContentLoaded', onPageReady);
     document.addEventListener('turbo:render', onPageReady);
     // turbo:load covers Turbo v7 (Contao ≤ 5.5) which does not fire turbo:render.
