@@ -509,3 +509,26 @@ This replaces the previous "one bundle re-aliases the interface" model, under wh
 - (−) One `loadDataContainer()` + one `SELECT pid[, ptable]` per chain hop on the resolve request (cached DCA, single-row lookups — negligible)
 - (−) Tables whose parent chain does not terminate in the three core tables still need a custom tagged resolver
 - (−) An existing bundle that re-aliased `PreviewUrlResolverInterface` now shadows the chain instead of just the core resolver — no known shipped consumer (feature is new in 3.0.2), documented as the escape hatch
+
+---
+
+## ADR-022: The eye-icon publish toggle is not covered by the refresh detection
+
+**Date:** 2026-09-24
+**Status:** Accepted (known gap — revisit if reported as painful)
+
+**Context:**
+The `pendingContentChange` mechanism (ADR-019) flags content-modifying backend actions and forces an iframe reload in `onPageReady` after the redirect. It catches navigational actions via `turbo:before-fetch-request`. The list-view publish toggle (eye icon, `act=toggle&field=…`) is **not navigational**: Contao's `AjaxRequest.toggleField()` (core.js) swaps the row icon optimistically, sends the change with `new Request.Contao({'followRedirects':false}).get()` — a MooTools XHR — and `return false` prevents the click from navigating. Neither `turbo:before-visit` (no Turbo visit) nor `turbo:before-fetch-request` (not a Turbo fetch) observes this request.
+
+Because the preview iframe deliberately persists across backend navigation, nothing else refreshes it either — so after an eye-icon toggle the preview shows the pre-toggle published state until the next full iframe reload (e.g. a save or a resolve with a URL change).
+
+**Decision:**
+Do not fix it now. Documented options for a future fix, in preference order:
+
+1. XHR hook — wrap `XMLHttpRequest.open()` before Contao's core.js loads (our script is `defer` in `<head>` and therefore runs first) and flag URLs containing `act=toggle`. Must also **trigger** the refresh directly (a toggle causes no navigation, so the `onPageReady` consumer never runs).
+2. MutationObserver on toggle icons — couples to Contao's icon classes/`data-state` attribute, breaks silently on markup changes; rejected for now.
+
+**Consequences:**
+- (+) No speculative code paths for a low-stakes operation
+- (−) Preview stays stale after eye-icon toggles until the next reload/navigation-based refresh
+- (+) A future fix is small and self-contained (option 1, ~10 lines) and can be added without touching ADR-019's flag plumbing
