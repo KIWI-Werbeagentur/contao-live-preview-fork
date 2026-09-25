@@ -427,7 +427,6 @@
         }
 
         if (doV === 'news' && tbl === 'tl_content' && !act) {
-            // News article content element list view: id is the news article.
             return { table: 'tl_news', id };
         }
 
@@ -436,7 +435,7 @@
         }
 
         if (doV === 'news' && id > 0) {
-            return { table: 'tl_news', id };
+            return { table: 'tl_news_archive', id };
         }
 
         if (tbl === 'tl_module' && act === 'edit' && id > 0) {

@@ -28,11 +28,12 @@ class PreviewUrlResolver implements PreviewUrlResolverInterface
     public function resolve(string $table, int $id): ?array
     {
         return match ($table) {
-            'tl_content' => $this->resolveFromContent($id),
-            'tl_article' => $this->resolveFromArticle($id),
-            'tl_news'    => $this->resolveFromNews($id),
-            'tl_page'    => $this->resolveFromPage($id),
-            default      => $this->resolveFromChildTable($table, $id, 0),
+            'tl_content'         => $this->resolveFromContent($id),
+            'tl_article'         => $this->resolveFromArticle($id),
+            'tl_news'            => $this->resolveFromNews($id),
+            'tl_news_archive'    => $this->resolveFromNewsArchive($id),
+            'tl_page'            => $this->resolveFromPage($id),
+            default              => $this->resolveFromChildTable($table, $id, 0),
         };
     }
 
@@ -225,22 +226,7 @@ class PreviewUrlResolver implements PreviewUrlResolverInterface
 
         $archiveId = (int) $row['pid'];
 
-        // Resolve the news archive's jumpTo page.
-        $archive = $this->connection->fetchAssociative(
-            'SELECT jumpTo FROM tl_news_archive WHERE id = ?',
-            [$archiveId],
-        );
-
-        if (!$archive) {
-            return null;
-        }
-
-        $jumpTo = (int) $archive['jumpTo'];
-        if ($jumpTo <= 0) {
-            return null;
-        }
-
-        $result = $this->resolveFromPage($jumpTo);
+        $result = $this->resolveFromNewsArchive($archiveId);
 
         if (null !== $result) {
             $result['newsId']    = $id;
@@ -301,5 +287,31 @@ class PreviewUrlResolver implements PreviewUrlResolverInterface
             'newsAlias'          => '',   // overwritten by resolveFromNews
             'newsTitle'          => '',   // overwritten by resolveFromNews
         ];
+    }
+
+    private function resolveFromNewsArchive(int $id): ?array
+    {
+        // Resolve the news archive's jumpTo page.
+        $row = $this->connection->fetchAssociative(
+            'SELECT jumpTo FROM tl_news_archive WHERE id = ?',
+            [$id],
+        );
+
+        if (!$row) {
+            return null;
+        }
+
+        $jumpTo = (int) $row['jumpTo'];
+        if ($jumpTo <= 0) {
+            return null;
+        }
+
+        $result = $this->resolveFromPage($jumpTo);
+
+        if (null !== $result) {
+            $result['newsArchiveId'] = $id;
+        }
+
+        return $result;
     }
 }
