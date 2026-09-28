@@ -60,34 +60,34 @@ class InjectPreviewScriptListener
         //   clp:refresh   — fetch current page, swap article DOM node, then highlight
         return <<<'HTML'
 <style>
-.clp-sel{outline:2px solid #0594ff!important;outline-offset:2px}
-.clp-sel-secondary{outline:2px dashed #0594ff!important;outline-offset:2px}
-.clp-hover{outline:2px dashed #d946ef!important;outline-offset:2px}
-.clp-badge,.clp-hover-badge{position:absolute;display:flex;align-items:center;gap:5px;color:#fff;font:700 11px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:7px 9px 8px 10px;border-radius:3px;white-space:nowrap;pointer-events:none}
-.clp-badge{background:#0594ff;z-index:2147483647}
-.clp-hover-badge{background:#d946ef;z-index:2147483647}
-.clp-badge-edit{all:unset;display:flex;align-items:center;cursor:pointer;opacity:.75;transition:opacity .15s;pointer-events:auto;padding:8px;margin:-8px}
-.clp-badge-edit:hover{opacity:1}
+/* Styles for selected/hovered elements */
+.clp-sel,.clp-sel-secondary,.clp-hover{outline:2px solid #0594ff!important;outline-offset:-2px}
+.clp-sel-secondary,.clp-hover{outline-style:dashed!important}
+.clp-hover{outline-color:#d946ef!important}
+/* Badge action styles */
+.clp-badge,.clp-hover-badge{position:absolute;display:flex;align-items:center;gap:5px;color:#fff;font:700 11px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:7px 9px 8px 10px;border-radius:3px;white-space:nowrap;pointer-events:none;background:#0594ff;z-index:2147483647}
+.clp-hover-badge{background:#d946ef}
+.clp-badge-edit,.clp-badge-action{all:unset;display:flex;align-items:center;cursor:pointer;opacity:.75;transition:opacity .15s;pointer-events:auto;padding:8px;margin:-8px}
+.clp-badge-action{justify-content:center;padding:5px;margin:-5px -2px;line-height:1}
+.clp-badge-edit:hover,.clp-badge-action:hover{opacity:1}
 .clp-badge-sep{display:inline-block;width:1px;height:12px;background:rgba(255,255,255,.3);margin:0 2px;flex-shrink:0;align-self:center}
-.clp-badge-action{all:unset;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.75;transition:opacity .15s;pointer-events:auto;padding:5px;margin:-5px -2px;line-height:1}
-.clp-badge-action:hover{opacity:1}
 </style>
 <script>(function(){
-// _el/_elCe  = data elements (carry data-contao-* attrs; used for hover exclusion + DOM swap).
-// _elVis/_elCeVis = visual targets (receive outline class + badge; child of data el when col-only-child).
-var _el=null,_elVis=null,_elCe=null,_elCeVis=null,_badge=null,_badgeCe=null,_gen=0;
+// _el/_elSecondary  = data elements (carry data-contao-* attrs; used for hover exclusion + DOM swap).
+var _el=null,_secondaryEl=null,_badge=null,_secondaryBadge=null,_gen=0;
 var _articleId=null,_contentElementId=null;
-var _hoverEl=null,_hoverElVis=null,_hoverBadge=null;
+var _hoverEl=null,_hoverBadge=null;
 var _refreshAbort=null;
 var _editIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M7 1.5l1.5 1.5-5.5 5.5H1.5V7L7 1.5z" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/><line x1="5.8" y1="2.7" x2="7.3" y2="4.2" stroke="#fff" stroke-width="1.2"/></svg>';
 var _dupIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx=".8"/><path d="M1 7.5V1h6.5v2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 var _addIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5.5" y1="1.5" x2="5.5" y2="9.5"/><line x1="1.5" y1="5.5" x2="9.5" y2="5.5"/></svg>';
 function findEl(sels){var r=null;for(var i=0;i<sels.length;i++){r=document.querySelector(sels[i]);if(r)break;}return r;}
-// When el is a single-child grid column wrapper (col-*), return the child as the visual target.
-// The data element (el) is kept for DOM queries; only the outline and badge move to the child.
+// Return the child as the visual target when el is a single-child grid column wrapper (col-*).
+// Used for attaching outline + badge to the child, the data element (el) is kept for DOM queries.
 function clpVisTarget(el){var cc=String(el.className||'').split(/\s+/);for(var i=0;i<cc.length;i++){if(cc[i].indexOf('col-')===0){if(el.children.length===1)return el.children[0];break;}}return el;}
-function clpClear(){if(_elVis){_elVis.classList.remove('clp-sel','clp-sel-secondary');_elVis=null;}_el=null;if(_elCeVis){_elCeVis.classList.remove('clp-sel');_elCeVis=null;}_elCe=null;if(_badge){_badge.remove();_badge=null;}if(_badgeCe){_badgeCe.remove();_badgeCe=null;}}
-function clpHoverClear(){if(_hoverElVis){_hoverElVis.classList.remove('clp-hover');_hoverElVis=null;}_hoverEl=null;if(_hoverBadge){_hoverBadge.remove();_hoverBadge=null;}}
+function _clear(refEl,refBadge){if(refEl){clpVisTarget(refEl).classList.remove('clp-sel','clp-sel-secondary','clp-hover');refEl=null;}if(refBadge){refBadge.remove();refBadge=null;}}
+function clpClear(){_clear(_el,_badge);_clear(_secondaryEl,_secondaryBadge);}
+function clpHoverClear(){_clear(_hoverEl,_hoverBadge);}
 function clpIsFixed(el){var n=el;while(n&&n!==document.body){if(getComputedStyle(n).position==='fixed')return true;n=n.parentElement;}return false;}
 // Position a badge at the top-left of its target. When the target box is too
 // short to contain the badge (empty article / element group with little padding),
@@ -96,14 +96,15 @@ function clpBadgePos(b,el){
   var r=el.getBoundingClientRect();
   var bh=b.offsetHeight||24;
   var above=r.height<bh+4;
+  var aboveGap=b.classList.contains('clp-hover-badge')?0:2;
   if(clpIsFixed(el)){
     b.style.position='fixed';
-    b.style.top=(above?Math.max(2,r.top-bh-2):r.top+2)+'px';
+    b.style.top=(above?Math.max(aboveGap,r.top-bh-aboveGap):r.top+2)+'px';
     b.style.left=(r.left+2)+'px';
   }else{
     b.style.position='';
     var t=window.scrollY+r.top;
-    b.style.top=(above?Math.max(window.scrollY+2,t-bh-2):t+2)+'px';
+    b.style.top=(above?Math.max(window.scrollY+aboveGap,t-bh-aboveGap):t+2)+'px';
     b.style.left=(window.scrollX+r.left+2)+'px';
   }
 }
@@ -112,57 +113,50 @@ function _rectsOverlap(a,c){return !(a.right<=c.left||c.right<=a.left||a.bottom<
 // the same top-left corner whenever the article/group has no own padding. Push
 // the (secondary) article badge below the CE badge so both stay readable.
 function clpDeconflict(){
-  if(!_badge||!_badgeCe)return;
-  if(_rectsOverlap(_badge.getBoundingClientRect(),_badgeCe.getBoundingClientRect())){
-    _badge.style.top=((parseFloat(_badge.style.top)||0)+_badgeCe.offsetHeight+4)+'px';
+  if(!_badge||!_secondaryBadge)return;
+  if(_rectsOverlap(_badge.getBoundingClientRect(),_secondaryBadge.getBoundingClientRect())){
+    _badge.style.top=((parseFloat(_badge.style.top)||0)+_secondaryBadge.offsetHeight+4)+'px';
   }
 }
 function _mkBadge(cls,lbl,table,editId){var b=document.createElement('div');b.className=cls;var s=document.createElement('span');s.textContent=lbl;b.appendChild(s);var btn=document.createElement('button');btn.type='button';btn.className='clp-badge-edit';btn.innerHTML=_editIcon;if(table&&editId){btn.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:edit',table:table,id:editId},'*');});}b.appendChild(btn);if(table==='tl_content'&&editId){var sep=document.createElement('span');sep.className='clp-badge-sep';b.appendChild(sep);var db=document.createElement('button');db.type='button';db.className='clp-badge-action';db.title='Element duplizieren';db.innerHTML=_dupIcon;db.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:duplicate',id:editId},'*');});b.appendChild(db);var nb=document.createElement('button');nb.type='button';nb.className='clp-badge-action';nb.title='Neues Element danach';nb.innerHTML=_addIcon;nb.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:insert-after',id:editId},'*');});b.appendChild(nb);}document.body.appendChild(b);return b;}
-function makeBadge(lbl,t,id){return _mkBadge('clp-badge',lbl,t,id);}
-function makeHoverBadge(lbl,t,id){return _mkBadge('clp-hover-badge',lbl,t,id);}
-function getCeLabel(el){if(el.dataset&&el.dataset.contaoLabel&&el.dataset.contaoLabel!==''){return el.dataset.contaoLabel.toUpperCase();}var cc=String(el.className||'').split(/\s+/);for(var i=0;i<cc.length;i++){if(cc[i].indexOf('ce_')===0){return cc[i].slice(3).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ').toUpperCase();}}return 'INHALTSELEMENT';}
-function clpReposAll(){if(_badge&&_elVis)clpBadgePos(_badge,_elVis);if(_badgeCe&&_elCeVis)clpBadgePos(_badgeCe,_elCeVis);if(_hoverBadge&&_hoverElVis)clpBadgePos(_hoverBadge,_hoverElVis);clpDeconflict();}
+function makeBadge(el,lbl,t,id,type=null){if(type==='hover'){_hoverBadge=_mkBadge('clp-hover-badge',lbl,t,id);clpBadgePos(_hoverBadge,clpVisTarget(el));}else if(type==='secondary'){_secondaryBadge=_mkBadge('clp-badge',lbl,t,id);clpBadgePos(_secondaryBadge,clpVisTarget(el));}else{_badge=_mkBadge('clp-badge',lbl,t,id);clpBadgePos(_badge,clpVisTarget(el));}}
+function getCeLabel(el){if(!el)return '';if(el.dataset&&el.dataset.contaoLabel&&el.dataset.contaoLabel!==''){return el.dataset.contaoLabel.toUpperCase();}var cc=String(el.className||'').split(/\s+/);for(var i=0;i<cc.length;i++){if(cc[i].indexOf('ce_')===0){return cc[i].slice(3).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ').toUpperCase();}}return 'INHALTSELEMENT';}
+function clpReposAll(){var vis=clpVisTarget(_el);if(_badge&&vis)clpBadgePos(_badge,vis);var secondaryVis=clpVisTarget(_secondaryEl);if(_secondaryBadge&&secondaryVis)clpBadgePos(_secondaryBadge,secondaryVis);var hoverVis=clpVisTarget(_hoverEl);if(_hoverBadge&&hoverVis)clpBadgePos(_hoverBadge,hoverVis);clpDeconflict();}
 window.addEventListener('resize',clpReposAll,{passive:true});
-function highlight(el,bh,label,table,editId){
+function highlight(el,bh,label,table,editId,type=null) {
+  if(!type)clpClear();
   var vis=clpVisTarget(el);
-  clpClear();_gen++;var myGen=_gen;
-  var rect=vis.getBoundingClientRect();
-  var targetY=window.scrollY+rect.top-(window.innerHeight-rect.height)/2;
-  window.scrollTo({top:Math.max(0,targetY),left:0,behavior:bh||'smooth'});
-  function apply(){if(_gen!==myGen)return;_el=el;_elVis=vis;vis.classList.add('clp-sel');if(label){_badge=makeBadge(label,table,editId);clpBadgePos(_badge,vis);}}
-  if((bh||'smooth')==='instant'){apply();}
+  _gen++;var myGen=_gen;
+  // strict matching on false (should default to 'smooth' otherwise)
+  if (bh!==false){
+    var rect=vis.getBoundingClientRect();
+    var targetY=window.scrollY+rect.top-(window.innerHeight-rect.height)/2;
+    window.scrollTo({top:Math.max(0,targetY),left:0,behavior:bh||'smooth'});
+  }
+  function apply(){if(_gen!==myGen)return;if(type==='hover'){_hoverEl=el;vis.classList.add('clp-hover')}else if (type==='secondary'){_secondaryEl=el;vis.classList.add('clp-sel-secondary')}else{_el=el;vis.classList.add('clp-sel')}if(label){makeBadge(el,label,table,editId,type);}}
+  if(bh===false||(bh||'smooth')==='instant'){apply();}
   else{var t;function hl(){clearTimeout(t);window.removeEventListener('scrollend',hl);apply();}if('onscrollend'in window)window.addEventListener('scrollend',hl,{once:true});t=setTimeout(hl,800);}
 }
 window.addEventListener('message',function(e){
   if(!e.data||!e.data.type)return;
   if(e.data.type==='clp:highlight'){
-    _articleId=e.data.articleId||null;
-    _contentElementId=e.data.contentElementId||null;
     var el=findEl(e.data.selectors||[]);
     var aEl=findEl(e.data.articleSelectors||[]);
-    if(el&&aEl&&el!==aEl){
-      var elVis=clpVisTarget(el);var aElVis=clpVisTarget(aEl);
-      clpClear();_gen++;
-      var rect=elVis.getBoundingClientRect();
-      window.scrollTo({top:Math.max(0,window.scrollY+rect.top-(window.innerHeight-rect.height)/2),left:0,behavior:e.data.scrollBehavior||'instant'});
-      _elCe=el;_elCeVis=elVis;elVis.classList.add('clp-sel');
-      _el=aEl;_elVis=aElVis;aElVis.classList.add('clp-sel-secondary');
-      // Prefer data-contao-label from the DOM — set by InjectContentElementMarkersListener
-      // in fully-bootstrapped frontend context, so language files are always complete.
-      var lbl=getCeLabel(el)||e.data.label||'';if(lbl){_badgeCe=makeBadge(lbl,'tl_content',_contentElementId);clpBadgePos(_badgeCe,elVis);}
-      var albl=e.data.articleLabel||'';if(albl){_badge=makeBadge(albl,'tl_article',_articleId);_badge.style.zIndex='2147483646';clpBadgePos(_badge,aElVis);}
-      clpDeconflict();
-    }else if(el||aEl){
-      var isCe=!!_contentElementId;
-      var target=el||aEl;
-      var lbl2=isCe?(getCeLabel(target)||e.data.label||''):(e.data.label||'');
-      highlight(target,e.data.scrollBehavior,lbl2,isCe?'tl_content':'tl_article',isCe?_contentElementId:_articleId);
-    }
+    _articleId=aEl?e.data.articleId||null:null;
+    _contentElementId=el?e.data.contentElementId||null:null;
+    if(!el&&!aEl){clpClear();return;}
+    var both=el&&aEl&&el!==aEl;
+    // Prefer data-contao-label from the DOM — set by InjectContentElementMarkersListener
+    // in fully-bootstrapped frontend context, so language files are always complete.
+    var lbl=getCeLabel(el)||e.data.label||'';
+    var bh=e.data.scrollBehavior;
+    if(el)highlight(el,both?bh||'instant':bh,lbl,el.dataset.contaoTable,_contentElementId);
+    if(aEl)highlight(aEl,both?false:bh,e.data.articleLabel||'',aEl.dataset.contaoTable,_articleId,both?'secondary':'');
+    if(both)clpDeconflict();
     return;
   }
   if(e.data.type==='clp:refresh'){
     var articleId=e.data.articleId;var selectors=e.data.selectors||[];var label=e.data.label||'';
-    var scrollX=window.scrollX,scrollY=window.scrollY;
     if(_refreshAbort){_refreshAbort.abort();}
     _refreshAbort=('AbortController'in window)?new AbortController():null;
     var fetchOpts={credentials:'same-origin',cache:'no-store',headers:{'X-Requested-With':'XMLHttpRequest'}};
@@ -174,7 +168,7 @@ window.addEventListener('message',function(e){
         var doc=new DOMParser().parseFromString(html,'text/html');
         var fresh=null,live=null;
         for(var i=0;i<selectors.length;i++){var f=doc.querySelector(selectors[i]);var l=document.querySelector(selectors[i]);if(f&&l){fresh=f;live=l;break;}}
-        if(fresh&&live){for(var ai=0;ai<fresh.attributes.length;ai++){live.setAttribute(fresh.attributes[ai].name,fresh.attributes[ai].value);}live.innerHTML=fresh.innerHTML;var el=findEl(selectors);if(el){var vis=clpVisTarget(el);clpClear();_el=el;_elVis=vis;vis.classList.add('clp-sel');if(label){_badge=makeBadge(label,'tl_article',_articleId);clpBadgePos(_badge,vis);}}}
+        if(fresh&&live){for(var ai=0;ai<fresh.attributes.length;ai++){live.setAttribute(fresh.attributes[ai].name,fresh.attributes[ai].value);}live.innerHTML=fresh.innerHTML;var el=findEl(selectors);if(el){highlight(el,false,label,'tl_article',_articleId);}}
         window.parent.postMessage({type:'clp:refreshed',articleId:articleId},'*');
       })
       .catch(function(err){
@@ -194,16 +188,12 @@ document.addEventListener('mouseover',function(e){
   if(!el){clpHoverClear();return;}
   if(el===_hoverEl)return;
   clpHoverClear();
-  if(el===_el||el===_elCe)return;
+  if(el===_el||el===_elSecondary)return;
   var table=el.dataset.contaoTable;
   var id=parseInt(el.dataset.contaoId,10)||0;
   if(!table||!id)return;
   var lbl=table==='tl_article'?'ARTIKEL':getCeLabel(el);
-  var vis=clpVisTarget(el);
-  _hoverEl=el;_hoverElVis=vis;
-  vis.classList.add('clp-hover');
-  _hoverBadge=makeHoverBadge(lbl,table,id);
-  clpBadgePos(_hoverBadge,vis);
+  highlight(el,false,lbl,table,id,'hover');
 });
 // mouseout: _hoverEl (the data/container element) defines the boundary.
 // Covers both the col-* wrapper and its single child — don't clear until cursor
