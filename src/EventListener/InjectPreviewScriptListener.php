@@ -60,10 +60,11 @@ class InjectPreviewScriptListener
         //   clp:refresh   — fetch current page, swap article DOM node, then highlight
         return <<<'HTML'
 <style>
-.clp-sel{outline:2px solid #0594ff!important;outline-offset:2px}
-.clp-sel-secondary{outline:2px dashed #0594ff!important;outline-offset:2px}
-.clp-hover{outline:2px dashed #d946ef!important;outline-offset:2px}
-.clp-badge,.clp-hover-badge{position:absolute;display:flex;align-items:center;gap:5px;color:#fff;font:700 11px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:7px 9px 8px 10px;border-radius:3px;white-space:nowrap;pointer-events:none}
+.clp-sel,.clp-sel-secondary,.clp-hover{position:relative}
+.clp-sel::before{content:'';display:block;position:absolute;top:0;left:0;width:100%;height:100%;outline:2px solid #0594ff!important;outline-offset:-2px;z-index:2147483647;pointer-events:none}
+.clp-sel-secondary::before{content:'';display:block;position:absolute;top:0;left:0;width:100%;height:100%;outline:2px dashed #0594ff!important;outline-offset:-2px;z-index:2147483647;pointer-events:none}
+.clp-hover::before{content:'';display:block;position:absolute;top:0;left:0;width:100%;height:100%;outline:2px dashed #d946ef!important;outline-offset:-4px;z-index:2147483647;pointer-events:none}
+.clp-badge,.clp-hover-badge{position:absolute;display:flex;align-items:center;gap:5px;color:#fff;font:700 11px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:7px 9px 8px 10px;border-radius:3px;white-space:nowrap;transition:top .15s}
 .clp-badge{background:#0594ff;z-index:2147483647}
 .clp-hover-badge{background:#d946ef;z-index:2147483647}
 .clp-badge-edit{all:unset;display:flex;align-items:center;cursor:pointer;opacity:.75;transition:opacity .15s;pointer-events:auto;padding:8px;margin:-8px}
@@ -79,6 +80,8 @@ var _el=null,_elVis=null,_elCe=null,_elCeVis=null,_badge=null,_badgeCe=null,_gen
 var _articleId=null,_contentElementId=null;
 var _hoverEl=null,_hoverElVis=null,_hoverBadge=null;
 var _refreshAbort=null;
+var _badgeMargin=4;
+var _hoverBadgeMargin=6;
 var _editIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M7 1.5l1.5 1.5-5.5 5.5H1.5V7L7 1.5z" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/><line x1="5.8" y1="2.7" x2="7.3" y2="4.2" stroke="#fff" stroke-width="1.2"/></svg>';
 var _dupIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx=".8"/><path d="M1 7.5V1h6.5v2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 var _addIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5.5" y1="1.5" x2="5.5" y2="9.5"/><line x1="1.5" y1="5.5" x2="9.5" y2="5.5"/></svg>';
@@ -95,26 +98,29 @@ function clpIsFixed(el){var n=el;while(n&&n!==document.body){if(getComputedStyle
 function clpBadgePos(b,el){
   var r=el.getBoundingClientRect();
   var bh=b.offsetHeight||24;
-  var above=r.height<bh+4;
+  var m=b.classList.contains('clp-hover-badge')?_hoverBadgeMargin:_badgeMargin;
+  var above=r.height<bh+(m*2);
+  // no gap for above badges
+  if(above&&b.classList.contains('clp-hover-badge'))m=0;
   if(clpIsFixed(el)){
     b.style.position='fixed';
-    b.style.top=(above?Math.max(2,r.top-bh-2):r.top+2)+'px';
-    b.style.left=(r.left+2)+'px';
+    b.style.top=(above?Math.max(m,r.top-bh-m):r.top+m)+'px';
+    b.style.left=(r.left+m)+'px';
   }else{
     b.style.position='';
     var t=window.scrollY+r.top;
-    b.style.top=(above?Math.max(window.scrollY+2,t-bh-2):t+2)+'px';
-    b.style.left=(window.scrollX+r.left+2)+'px';
+    b.style.top=(above?Math.max(window.scrollY+m,t-bh-m):t+m)+'px';
+    b.style.left=(window.scrollX+r.left+m)+'px';
   }
 }
 function _rectsOverlap(a,c){return !(a.right<=c.left||c.right<=a.left||a.bottom<=c.top||c.bottom<=a.top);}
 // Dual-highlight mode stacks the content-element badge and the article badge on
 // the same top-left corner whenever the article/group has no own padding. Push
-// the (secondary) article badge below the CE badge so both stay readable.
+// the (secondary) article badge above the CE badge so both stay readable.
 function clpDeconflict(){
   if(!_badge||!_badgeCe)return;
   if(_rectsOverlap(_badge.getBoundingClientRect(),_badgeCe.getBoundingClientRect())){
-    _badge.style.top=((parseFloat(_badge.style.top)||0)+_badgeCe.offsetHeight+4)+'px';
+    _badge.style.top=((parseFloat(_badge.style.top)||0)-_badgeCe.offsetHeight)+'px';
   }
 }
 function _mkBadge(cls,lbl,table,editId,parentTable){var b=document.createElement('div');b.className=cls;var s=document.createElement('span');s.textContent=lbl;b.appendChild(s);var btn=document.createElement('button');btn.type='button';btn.className='clp-badge-edit';btn.innerHTML=_editIcon;if(table&&editId){btn.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:edit',table:table,id:editId,parentTable:parentTable||''},'*');});}b.appendChild(btn);if(table==='tl_content'&&editId){var sep=document.createElement('span');sep.className='clp-badge-sep';b.appendChild(sep);var db=document.createElement('button');db.type='button';db.className='clp-badge-action';db.title='Element duplizieren';db.innerHTML=_dupIcon;db.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:duplicate',id:editId,parentTable:parentTable||''},'*');});b.appendChild(db);var nb=document.createElement('button');nb.type='button';nb.className='clp-badge-action';nb.title='Neues Element danach';nb.innerHTML=_addIcon;nb.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:insert-after',id:editId,parentTable:parentTable||''},'*');});b.appendChild(nb);}document.body.appendChild(b);return b;}
