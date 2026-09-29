@@ -123,6 +123,15 @@ function clpDeconflict(){
     _badge.style.top=((parseFloat(_badge.style.top)||0)-_badgeCe.offsetHeight)+'px';
   }
 }
+function clpDeconflictHover(){
+  if(!_hoverBadge||!(_badgeCe||_badge))return;
+  if(_rectsOverlap(_badge.getBoundingClientRect(),_hoverBadge.getBoundingClientRect())){
+    _badge.style.top=((parseFloat(_badge.style.top)||0)-_hoverBadge.offsetHeight)+'px';
+  }
+  if(_rectsOverlap(_badgeCe.getBoundingClientRect(),_hoverBadge.getBoundingClientRect())){
+    _badgeCe.style.top=((parseFloat(_badgeCe.style.top)||0)-_hoverBadge.offsetHeight)+'px';
+  }
+}
 function _mkBadge(cls,lbl,table,editId,parentTable){var b=document.createElement('div');b.className=cls;var s=document.createElement('span');s.textContent=lbl;b.appendChild(s);var btn=document.createElement('button');btn.type='button';btn.className='clp-badge-edit';btn.innerHTML=_editIcon;if(table&&editId){btn.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:edit',table:table,id:editId,parentTable:parentTable||''},'*');});}b.appendChild(btn);if(table==='tl_content'&&editId){var sep=document.createElement('span');sep.className='clp-badge-sep';b.appendChild(sep);var db=document.createElement('button');db.type='button';db.className='clp-badge-action';db.title='Element duplizieren';db.innerHTML=_dupIcon;db.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:duplicate',id:editId,parentTable:parentTable||''},'*');});b.appendChild(db);var nb=document.createElement('button');nb.type='button';nb.className='clp-badge-action';nb.title='Neues Element danach';nb.innerHTML=_addIcon;nb.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:insert-after',id:editId,parentTable:parentTable||''},'*');});b.appendChild(nb);}document.body.appendChild(b);return b;}
 function makeBadge(lbl,t,id,pt){return _mkBadge('clp-badge',lbl,t,id,pt);}
 function makeHoverBadge(lbl,t,id,pt){return _mkBadge('clp-hover-badge',lbl,t,id,pt);}
@@ -211,6 +220,7 @@ document.addEventListener('mouseover',function(e){
   vis.classList.add('clp-hover');
   _hoverBadge=makeHoverBadge(lbl,table,id,getCeParentTable(el));
   clpBadgePos(_hoverBadge,vis);
+  clpDeconflictHover();
 });
 // mouseout: _hoverEl (the data/container element) defines the boundary.
 // Covers both the col-* wrapper and its single child — don't clear until cursor
@@ -221,6 +231,7 @@ document.addEventListener('mouseout',function(e){
   if(rel&&(rel===_hoverEl||_hoverEl.contains(rel)))return;
   if(_hoverBadge&&rel&&(rel===_hoverBadge||_hoverBadge.contains(rel)))return;
   clpHoverClear();
+  clpReposAll();
 });
 // Keep ?_clp=1 on same-origin in-frame navigation so the preview script is
 // re-injected on every page the editor browses to. Without this, following an
