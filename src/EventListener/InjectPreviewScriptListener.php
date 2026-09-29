@@ -210,16 +210,30 @@ document.addEventListener('mouseover',function(e){
   if(!el){clpHoverClear();return;}
   if(el===_hoverEl)return;
   clpHoverClear();
-  if(el===_el||el===_elCe)return;
   var table=el.dataset.contaoTable;
   var id=parseInt(el.dataset.contaoId,10)||0;
   if(!table||!id)return;
   var lbl=table==='tl_article'?'ARTIKEL':getCeLabel(el);
   var vis=clpVisTarget(el);
-  _hoverEl=el;_hoverElVis=vis;
-  vis.classList.add('clp-hover');
   _hoverBadge=makeHoverBadge(lbl,table,id,getCeParentTable(el));
   clpBadgePos(_hoverBadge,vis);
+  if(el===_el||el===_elCe){
+    // If hover target is already highlighted and would overlap with parent, show parent hover badge.
+    var parent=el.parentElement.closest('[data-contao-table]');
+    if (!parent){clpHoverClear();return;}
+    var pVis=clpVisTarget(parent);
+    var pTable=parent.dataset.contaoTable;
+    var pId=parseInt(parent.dataset.contaoId,10)||0;
+    if(!pTable||!pId){clpHoverClear();return;}
+    var pLabel=pTable==='tl_article'?'ARTIKEL':getCeLabel(parent);
+    var pBadge=makeHoverBadge(pLabel,pTable,pId,getCeParentTable(parent));
+    clpBadgePos(pBadge,pVis);
+    if(!_rectsOverlap(pBadge.getBoundingClientRect(),_hoverBadge.getBoundingClientRect()))return;
+    clpHoverClear();
+    el=parent;_hoverBadge=pBadge;
+  }
+  _hoverEl=el;_hoverElVis=vis;
+  vis.classList.add('clp-hover');
   clpDeconflictHover();
 });
 // mouseout: _hoverEl (the data/container element) defines the boundary.
