@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ThinkDigital\ContaoLivePreview\EventListener;
 
+use Contao\System;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
@@ -45,6 +46,15 @@ class InjectPreviewScriptListener
 
         $response->setContent(str_replace('</body>', $this->buildInjection() . '</body>', $content));
 
+        // HOOK: add custom preview script injection
+        if (isset($GLOBALS['TL_HOOKS']['injectPreviewScript']) && \is_array($GLOBALS['TL_HOOKS']['injectPreviewScript']))
+        {
+            foreach ($GLOBALS['TL_HOOKS']['injectPreviewScript'] as $callback)
+            {
+                $response = System::importStatic($callback[0])->{$callback[1]}($response);
+            }
+        }
+
         // no-cache: browser always revalidates before using a cached response.
         // A 304 Not Modified costs only one RTT (no body) so navigation stays snappy,
         // while stale content after saves or back-navigations within 60 s is impossible.
@@ -58,7 +68,7 @@ class InjectPreviewScriptListener
         // preview iframe (?_clp=1). Handles two message types from the backend:
         //   clp:highlight — scroll to element, apply persistent blue outline + label badge
         //   clp:refresh   — fetch current page, swap article DOM node, then highlight
-        return <<<'HTML'
+        $html = <<<'HTML'
 <style>
 .clp-sel{outline:2px solid #0594ff!important;outline-offset:2px}
 .clp-sel-secondary{outline:2px dashed #0594ff!important;outline-offset:2px}
@@ -82,6 +92,156 @@ var _refreshAbort=null;
 var _editIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M7 1.5l1.5 1.5-5.5 5.5H1.5V7L7 1.5z" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/><line x1="5.8" y1="2.7" x2="7.3" y2="4.2" stroke="#fff" stroke-width="1.2"/></svg>';
 var _dupIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx=".8"/><path d="M1 7.5V1h6.5v2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 var _addIcon='<svg style="flex-shrink:0" width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="5.5" y1="1.5" x2="5.5" y2="9.5"/><line x1="1.5" y1="5.5" x2="9.5" y2="5.5"/></svg>';
+/**
+ * CLP_FE — frontend registry (lives inside the preview iframe). Two concerns:
+ *   1. Badge actions: id-keyed set/remove/move/each, grouped into two sections:
+ *      'primary' (e.g. the edit pencil) and 'secondary' (e.g. duplicate/insert).
+ *      _mkBadge renders all primaries, one separator, then all secondaries.
+ *      An action's section decides where it renders; the button's CSS class is
+ *      purely styling (default 'clp-badge-action') and does NOT decide the section.
+ *      A badge with no registered actions shows only the label — a valid state.
+ *   2. Incoming message handlers (_ih): id-keyed on/off/dispatch, parallel to
+ *      CLP_BE. The bundle's message listener calls CLP_FE.dispatch(e); any
+ *      clp:* message with no registered handler is re-dispatched as a
+ *      CustomEvent on `document` so third-party FE scripts can listen via
+ *      document.addEventListener('clp:acme:foo', …). See docs/EXTENDING.md.
+ */
+window.CLP_FE={
+  version:1,
+  _a:[],
+  _ih:{},
+  set:function(id,provider,opts){
+    opts=opts||{};
+    var hasSection=opts.section!==undefined&&opts.section!==null;
+    var section=hasSection&&opts.section==='primary'?'primary':'secondary';
+    var hasPos=opts.position!==undefined&&opts.position!==null;
+    var pos=hasPos?opts.position:'last';
+    var i=this._a.findIndex(function(x){return x.id===id;});
+    var rec={id:id,provider:provider,section:section,pos:pos,prev:null};
+    if(i>=0){
+      // store action as prev for chaining/fallback (preserved across multiple overrides)
+      rec.prev=this._a[i];
+      // use existing section/position (unless set from options)
+      if (!hasPos){rec.pos=rec.prev.pos;}
+      if (!hasSection){rec.section=rec.prev.section;}
+      if(hasPos||hasSection){
+        // remove existing action from list (will be added at new position/section)
+        this._a.splice(i,1);
+      }else{
+        // replace existing action with new one (no position change)
+        this._a[i]=rec;
+        return this;
+      }
+    }
+    // add new action to list
+    this._a.push(rec);
+    return this;
+  },
+  remove:function(id,provider){
+    if (!provider) {
+      // remove action from ALL elements
+      this._a=this._a.filter(function(x){return x.id!==id;});
+    } else {
+      // add removeProvider to action
+      var i=this._a.findIndex(function(x){return x.id===id;});
+      if(i>=0){
+        this._a[i].removeProvider=provider;
+      }
+    }
+    return this;
+  },
+  move:function(id,pos){
+    var i=this._a.findIndex(function(x){return x.id===id;});
+    if(i<0)return this;
+    var rec=this._a.splice(i,1)[0];
+    rec.pos=(pos!==undefined&&pos!==null)?pos:'last';
+    this._a.push(rec);
+    return this;
+  },
+  each:function(ctx,post){
+    var ui=this._ui(post,ctx);
+    var out=[];
+    for(var i=0;i<this._a.length;i++){
+      var r=this._run(this._a[i],ctx,post,ui);
+      if(r)out.push({id:this._a[i].id,section:this._a[i].section,pos:this._a[i].pos,button:r});
+    }
+    return out;
+  },
+  // Run a record's provider; on null/undefined fall back to .prev (the chained
+  // previous provider, which may itself have a .prev). Throwing → null → fall back.
+  // If the current record has a removeProvider that returns `true`, do
+  // not fall back but directly return null.
+  _run:function(rec,ctx,post,ui){
+    var cur=rec;
+    while(cur){
+      var r=null;
+      if (cur.removeProvider) {
+        try{r=cur.removeProvider(ctx,post,ui);}catch(e){r=null;}
+        if(r)return null;
+      }
+      try{r=cur.provider(ctx,post,ui);}catch(e){r=null;}
+      if(r)return r;
+      cur=cur.prev;
+    }
+    return null;
+  },
+  post:function(msg){window.parent.postMessage(Object.assign({version:1},msg),'*');},
+  // ui.button(opts) — builds a styled button/<a> so providers don't hand-roll markup.
+  // opts: { icon, title?, class?, postOptions?, href?, callback? } — icon is required.
+  //   icon     → HTML string (intended to be an icon: svg/img/emoji). Becomes innerHTML.
+  //   title    → the title attribute (tooltip); optional.
+  //   class    → extra CSS class APPENDED to the base ('clp-badge-action' by default,
+  //              'clp-badge-edit' for the primary style). Purely styling — does NOT
+  //              decide the badge section (that's the action's section at registration).
+  //   postOptions → message payload posted on click; post() stamps version:1.
+  //   href     → if set, renders an <a href> instead of <button> for a link preview.
+  //              Cosmetic — click preventDefaults + posts when postOptions is set;
+  //              pure link when only href. Not for core edit/duplicate/insert-after.
+  //   callback → function(ev, ctx) run on click BEFORE postOptions. Always gets
+  //              stopPropagation + (for links) preventDefault so the click doesn't
+  //              navigate/bubble. Use for FE-only behaviour (modal, toggle) without a
+  //              BE round-trip; combine with postOptions to also post afterwards.
+  _ui:function(post,ctx){
+    return {
+      button:function(opts){
+        opts=opts||{};
+        if(opts.icon===undefined||opts.icon==='')throw new Error('CLP_FE.button: icon required');
+        var isLink=opts.href!==undefined&&opts.href!=='';
+        var el=document.createElement(isLink?'a':'button');
+        if(!isLink)el.type='button';
+        // Base class is always set (consistent layout); opts.class is appended.
+        var base=opts.class==='clp-badge-edit'?'clp-badge-edit':'clp-badge-action';
+        el.className=base+(opts.class&&opts.class!==base?(' '+opts.class):'');
+        if(opts.title)el.title=opts.title;
+        el.innerHTML=opts.icon;
+        if(isLink)el.href=opts.href;
+        el.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          if (typeof opts.callback === 'function') {
+            if(isLink)ev.preventDefault();
+            opts.callback(ev, ctx);
+          }
+          if(opts.postOptions){
+            if(isLink)ev.preventDefault();
+            post(opts.postOptions);
+          }
+        });
+        return el;
+      }
+    };
+  },
+  on:function(type,fn,id){((this._ih[type]||(this._ih[type]=new Map())).set(id||type,fn));return this;},
+  off:function(type,id){if(this._ih[type])this._ih[type].delete(id||type);return this;},
+  // Dispatch an incoming message to registered handlers. Returns true if a
+  // handler ran, false otherwise (used by the listener to decide CustomEvent
+  // re-dispatch for unrecognised clp:* types). Throwing handlers are skipped.
+  dispatch:function(e){
+    var d=e.data;if(!d||typeof d.type!=='string')return false;
+    var map=this._ih[d.type];if(!map||map.size===0)return false;
+    map.forEach(function(fn){try{fn(d,e);}catch(_){}});return true;
+  }
+};
+function _clpSep(){var s=document.createElement('span');s.className='clp-badge-sep';return s;}
 function findEl(sels){var r=null;for(var i=0;i<sels.length;i++){r=document.querySelector(sels[i]);if(r)break;}return r;}
 // When el is a single-child grid column wrapper (col-*), return the child as the visual target.
 // The data element (el) is kept for DOM queries; only the outline and badge move to the child.
@@ -117,10 +277,114 @@ function clpDeconflict(){
     _badge.style.top=((parseFloat(_badge.style.top)||0)+_badgeCe.offsetHeight+4)+'px';
   }
 }
-function _mkBadge(cls,lbl,table,editId){var b=document.createElement('div');b.className=cls;var s=document.createElement('span');s.textContent=lbl;b.appendChild(s);var btn=document.createElement('button');btn.type='button';btn.className='clp-badge-edit';btn.innerHTML=_editIcon;if(table&&editId){btn.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:edit',table:table,id:editId},'*');});}b.appendChild(btn);if(table==='tl_content'&&editId){var sep=document.createElement('span');sep.className='clp-badge-sep';b.appendChild(sep);var db=document.createElement('button');db.type='button';db.className='clp-badge-action';db.title='Element duplizieren';db.innerHTML=_dupIcon;db.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:duplicate',id:editId},'*');});b.appendChild(db);var nb=document.createElement('button');nb.type='button';nb.className='clp-badge-action';nb.title='Neues Element danach';nb.innerHTML=_addIcon;nb.addEventListener('click',function(ev){ev.stopPropagation();window.parent.postMessage({type:'clp:insert-after',id:editId},'*');});b.appendChild(nb);}document.body.appendChild(b);return b;}
-function makeBadge(lbl,t,id){return _mkBadge('clp-badge',lbl,t,id);}
-function makeHoverBadge(lbl,t,id){return _mkBadge('clp-hover-badge',lbl,t,id);}
-function getCeLabel(el){if(el.dataset&&el.dataset.contaoLabel&&el.dataset.contaoLabel!==''){return el.dataset.contaoLabel.toUpperCase();}var cc=String(el.className||'').split(/\s+/);for(var i=0;i<cc.length;i++){if(cc[i].indexOf('ce_')===0){return cc[i].slice(3).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ').toUpperCase();}}return 'INHALTSELEMENT';}
+// _mkBadge renders the label, then primary actions, one separator, then
+// secondary actions. ctx exposes the data the bundle already has at the call
+// site so providers can gate by element kind without patching this script.
+// ceType is the stable CE type key from the data attribute (NOT the translated label);
+// null for non-CE tables.
+function _sortButtons(buttons){
+  var out={primary:[],secondary:[]};
+  for(var i=0;i<buttons.length;i++){
+    const rec = buttons[i];
+    const pos = (rec.pos !== undefined && rec.pos !== null) ? rec.pos : 'last';
+    let target = out[rec.section==='primary'?'primary':'secondary'];
+    if(pos==='first'){
+        target.unshift(rec);
+        continue;
+    }
+    if(pos==='last'){
+        target.push(rec);
+        continue;
+    }
+    if(typeof pos==='number'){
+        const numPos=Math.max(0,Math.min(pos,target.length));
+        target.splice(numPos, 0, rec);
+        continue;
+    }
+    const anchor=pos.before||pos.after;
+    if (anchor) {
+        let anchorRec = null;
+        // Find the anchor record from original buttons array.
+        for (let k = 0; k < buttons.length; k++) {
+            if (buttons[k].id === anchor) {
+                anchorRec = buttons[k];
+                break;
+            }
+        }
+        if (!anchorRec) {
+            target.push(rec);
+            continue;
+        }
+        target = out[anchorRec.section];
+        let ai = -1;
+        // Find the anchor index in the sorted array.
+        for(let k = 0; k < target.length; k++) {
+            if (target[k].id === anchor) {
+                ai = k;
+                break;
+            }
+        }
+        if (ai < 0) {
+            target.push(rec);
+            continue;
+        }
+        rec.section = anchorRec.section;
+        target.splice((pos.after?ai+1:ai), 0, rec);
+        continue;
+    }
+    target.push(rec);
+  }
+  return {
+      primaries: out.primary.map(function(b){return b.button;}),
+      secondaries: out.secondary.map(function(b){return b.button;})
+  };
+}
+function _mkBadge(cls,lbl,table,editId,parentTable,el){
+  var b=document.createElement('div');b.className=cls;
+  var s=document.createElement('span');s.textContent=lbl;b.appendChild(s);
+  var vis=el?clpVisTarget(el):null;
+  var ceType=(el&&table==='tl_content')?getCeType(el):null;
+  var ctx={table:table,id:editId||0,parentTable:parentTable||'',el:el||null,vis:vis,ceType:ceType,ceLabel:el&&ceType?getCeLabel(el):null};
+  // each() returns {section,button} pairs in registration order. Split into the two
+  // sections, render primaries, one separator (only if secondaries exist), then secondaries.
+  var {primaries,secondaries}=_sortButtons(CLP_FE.each(ctx,CLP_FE.post.bind(CLP_FE)));
+  for(var p=0;p<primaries.length;p++)b.appendChild(primaries[p]);
+  if(secondaries.length)b.appendChild(_clpSep());
+  for(var q=0;q<secondaries.length;q++) {
+      b.appendChild(secondaries[q]);
+  }
+  document.body.appendChild(b);return b;
+}
+function makeBadge(lbl,t,id,pt,el){return _mkBadge('clp-badge',lbl,t,id,pt,el);}
+function makeHoverBadge(lbl,t,id,pt,el){return _mkBadge('clp-hover-badge',lbl,t,id,pt,el);}
+// --- Core badge actions (registered once, replaceable/removable by id) ---
+// clp:edit is the primary action; clp:duplicate / clp:insert-after are secondary.
+CLP_FE.set('clp:edit',function(ctx,post,ui){
+  if(!ctx.table||!ctx.id)return null;
+  return ui.button({icon:_editIcon,class:'clp-badge-edit',title:'Element bearbeiten',postOptions:{type:'clp:edit',table:ctx.table,id:ctx.id,parentTable:ctx.parentTable||''}});
+},{section:'primary'});
+CLP_FE.set('clp:duplicate',function(ctx,post,ui){
+  if(ctx.table!=='tl_content'||!ctx.id)return null;
+  return ui.button({icon:_dupIcon,title:'Element duplizieren',postOptions:{type:'clp:duplicate',id:ctx.id,parentTable:ctx.parentTable||''}});
+});
+CLP_FE.set('clp:insert-after',function(ctx,post,ui){
+  if(ctx.table!=='tl_content'||!ctx.id)return null;
+  return ui.button({icon:_addIcon,title:'Neues Element danach',postOptions:{type:'clp:insert-after',id:ctx.id,parentTable:ctx.parentTable||''}});
+});
+function getCeLabel(el){if(el.dataset&&el.dataset.contaoLabel&&el.dataset.contaoLabel!==''){return el.dataset.contaoLabel.toUpperCase();}var cc=String(el.className||'').split(/\s+/);for(var i=0;i<cc.length;i++){if(cc[i].indexOf('ce_')===0){return cc[i].slice(3).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ').toUpperCase();}if(cc[i].indexOf('content-')===0&&cc[i]!=='content-'){return cc[i].slice(8).replace(/-/g,' ').toUpperCase();}}return 'INHALTSELEMENT';}
+// Stable CE type key (e.g. 'image','text','accordion') from the data attribute — NOT the
+// translated label. Used for ctx.ceType so providers can gate by element type
+// regardless of the backend language. Returns null when the attribute is missing.
+function getCeType(el){return (el.dataset&&el.dataset.contaoType&&el.dataset.contaoType!=='') ? el.dataset.contaoType : null;}
+// Nearest marker ancestor (excluding el itself) decides the ptable: tl_news
+// wrapper for news CEs, the group CE wrapper for element-group children,
+// the article wrapper for top-level CEs. Consumers only test tl_news /
+// tl_content; everything else falls back to the DCA default.
+function getCeParentTable(el){
+  var p=el.parentElement;
+  var m=p&&p.closest('[data-contao-table]');
+  return m?m.dataset.contaoTable:'';
+}
 function clpReposAll(){if(_badge&&_elVis)clpBadgePos(_badge,_elVis);if(_badgeCe&&_elCeVis)clpBadgePos(_badgeCe,_elCeVis);if(_hoverBadge&&_hoverElVis)clpBadgePos(_hoverBadge,_hoverElVis);clpDeconflict();}
 window.addEventListener('resize',clpReposAll,{passive:true});
 function highlight(el,bh,label,table,editId){
@@ -129,61 +393,78 @@ function highlight(el,bh,label,table,editId){
   var rect=vis.getBoundingClientRect();
   var targetY=window.scrollY+rect.top-(window.innerHeight-rect.height)/2;
   window.scrollTo({top:Math.max(0,targetY),left:0,behavior:bh||'smooth'});
-  function apply(){if(_gen!==myGen)return;_el=el;_elVis=vis;vis.classList.add('clp-sel');if(label){_badge=makeBadge(label,table,editId);clpBadgePos(_badge,vis);}}
+  function apply(){if(_gen!==myGen)return;_el=el;_elVis=vis;vis.classList.add('clp-sel');if(label){_badge=makeBadge(label,table,editId,getCeParentTable(el),el);clpBadgePos(_badge,vis);}}
   if((bh||'smooth')==='instant'){apply();}
   else{var t;function hl(){clearTimeout(t);window.removeEventListener('scrollend',hl);apply();}if('onscrollend'in window)window.addEventListener('scrollend',hl,{once:true});t=setTimeout(hl,800);}
 }
+// Incoming messages from the parent are dispatched through CLP_FE so third
+// parties can register/override handlers without patching this script. Any
+// clp:* message with no registered handler is re-dispatched as a CustomEvent
+// on document (see listener below). Core handlers are registered after this.
 window.addEventListener('message',function(e){
-  if(!e.data||!e.data.type)return;
-  if(e.data.type==='clp:highlight'){
-    _articleId=e.data.articleId||null;
-    _contentElementId=e.data.contentElementId||null;
-    var el=findEl(e.data.selectors||[]);
-    var aEl=findEl(e.data.articleSelectors||[]);
-    if(el&&aEl&&el!==aEl){
-      var elVis=clpVisTarget(el);var aElVis=clpVisTarget(aEl);
-      clpClear();_gen++;
-      var rect=elVis.getBoundingClientRect();
-      window.scrollTo({top:Math.max(0,window.scrollY+rect.top-(window.innerHeight-rect.height)/2),left:0,behavior:e.data.scrollBehavior||'instant'});
-      _elCe=el;_elCeVis=elVis;elVis.classList.add('clp-sel');
-      _el=aEl;_elVis=aElVis;aElVis.classList.add('clp-sel-secondary');
-      // Prefer data-contao-label from the DOM — set by InjectContentElementMarkersListener
-      // in fully-bootstrapped frontend context, so language files are always complete.
-      var lbl=getCeLabel(el)||e.data.label||'';if(lbl){_badgeCe=makeBadge(lbl,'tl_content',_contentElementId);clpBadgePos(_badgeCe,elVis);}
-      var albl=e.data.articleLabel||'';if(albl){_badge=makeBadge(albl,'tl_article',_articleId);_badge.style.zIndex='2147483646';clpBadgePos(_badge,aElVis);}
-      clpDeconflict();
-    }else if(el||aEl){
-      var isCe=!!_contentElementId;
-      var target=el||aEl;
-      var lbl2=isCe?(getCeLabel(target)||e.data.label||''):(e.data.label||'');
-      highlight(target,e.data.scrollBehavior,lbl2,isCe?'tl_content':'tl_article',isCe?_contentElementId:_articleId);
-    }
-    return;
+  var handled=CLP_FE.dispatch(e);
+  if(handled)return;
+  // Unrecognised clp:* message → re-dispatch as a CustomEvent so third-party
+  // FE scripts can document.addEventListener('clp:acme:foo', …) without adding
+  // their own message listener. detail is the full message payload.
+  var d=e.data;
+  if(d&&typeof d.type==='string'&&d.type.indexOf('clp:')===0){
+    try{document.dispatchEvent(new CustomEvent(d.type,{detail:d}));}catch(_){}
   }
-  if(e.data.type==='clp:refresh'){
-    var articleId=e.data.articleId;var selectors=e.data.selectors||[];var label=e.data.label||'';
-    var scrollX=window.scrollX,scrollY=window.scrollY;
-    if(_refreshAbort){_refreshAbort.abort();}
-    _refreshAbort=('AbortController'in window)?new AbortController():null;
-    var fetchOpts={credentials:'same-origin',cache:'no-store',headers:{'X-Requested-With':'XMLHttpRequest'}};
-    if(_refreshAbort){fetchOpts.signal=_refreshAbort.signal;}
-    fetch(window.location.href,fetchOpts)
-      .then(function(r){return r.text();})
-      .then(function(html){
-        _refreshAbort=null;
-        var doc=new DOMParser().parseFromString(html,'text/html');
-        var fresh=null,live=null;
-        for(var i=0;i<selectors.length;i++){var f=doc.querySelector(selectors[i]);var l=document.querySelector(selectors[i]);if(f&&l){fresh=f;live=l;break;}}
-        if(fresh&&live){for(var ai=0;ai<fresh.attributes.length;ai++){live.setAttribute(fresh.attributes[ai].name,fresh.attributes[ai].value);}live.innerHTML=fresh.innerHTML;var el=findEl(selectors);if(el){var vis=clpVisTarget(el);clpClear();_el=el;_elVis=vis;vis.classList.add('clp-sel');if(label){_badge=makeBadge(label,'tl_article',_articleId);clpBadgePos(_badge,vis);}}}
-        window.parent.postMessage({type:'clp:refreshed',articleId:articleId},'*');
-      })
-      .catch(function(err){
-        if(err&&err.name==='AbortError'){return;}
-        _refreshAbort=null;
-        window.parent.postMessage({type:'clp:refreshed',articleId:articleId},'*');
-      });
-    return;
+});
+
+// --- Core incoming-message handlers (registered once, replaceable by id) ---
+
+// clp:highlight — scroll to and outline the edited article/CE, render badges.
+CLP_FE.on('clp:highlight',function(d){
+  _articleId=d.articleId||null;
+  _contentElementId=d.contentElementId||null;
+  var el=findEl(d.selectors||[]);
+  var aEl=findEl(d.articleSelectors||[]);
+  if(el&&aEl&&el!==aEl){
+    var elVis=clpVisTarget(el);var aElVis=clpVisTarget(aEl);
+    clpClear();_gen++;
+    var rect=elVis.getBoundingClientRect();
+    window.scrollTo({top:Math.max(0,window.scrollY+rect.top-(window.innerHeight-rect.height)/2),left:0,behavior:d.scrollBehavior||'instant'});
+    _elCe=el;_elCeVis=elVis;elVis.classList.add('clp-sel');
+    _el=aEl;_elVis=aElVis;aElVis.classList.add('clp-sel-secondary');
+    // Prefer data-contao-label from the DOM — set by InjectContentElementMarkersListener
+    // in fully-bootstrapped frontend context, so language files are always complete.
+    var lbl=getCeLabel(el)||d.label||'';if(lbl){_badgeCe=makeBadge(lbl,'tl_content',_contentElementId,getCeParentTable(el),el);clpBadgePos(_badgeCe,elVis);}
+    var albl=d.articleLabel||'';if(albl){_badge=makeBadge(albl,'tl_article',_articleId,'',aEl);_badge.style.zIndex='2147483646';clpBadgePos(_badge,aElVis);}
+    clpDeconflict();
+  }else if(el||aEl){
+    var isCe=!!_contentElementId;
+    var target=el||aEl;
+    var lbl2=isCe?(getCeLabel(target)||d.label||''):(d.label||'');
+    highlight(target,d.scrollBehavior,lbl2,isCe?'tl_content':'tl_article',isCe?_contentElementId:_articleId);
   }
+});
+
+// clp:refresh — partial DOM swap of the article node from a fresh fetch of the
+// current page URL. Preserves scroll position, posts clp:refreshed on completion.
+CLP_FE.on('clp:refresh',function(d){
+  var articleId=d.articleId;var selectors=d.selectors||[];var label=d.label||'';
+  var scrollX=window.scrollX,scrollY=window.scrollY;
+  if(_refreshAbort){_refreshAbort.abort();}
+  _refreshAbort=('AbortController'in window)?new AbortController():null;
+  var fetchOpts={credentials:'same-origin',cache:'no-store',headers:{'X-Requested-With':'XMLHttpRequest'}};
+  if(_refreshAbort){fetchOpts.signal=_refreshAbort.signal;}
+  fetch(window.location.href,fetchOpts)
+    .then(function(r){return r.text();})
+    .then(function(html){
+      _refreshAbort=null;
+      var doc=new DOMParser().parseFromString(html,'text/html');
+      var fresh=null,live=null;
+      for(var i=0;i<selectors.length;i++){var f=doc.querySelector(selectors[i]);var l=document.querySelector(selectors[i]);if(f&&l){fresh=f;live=l;break;}}
+      if(fresh&&live){for(var ai=0;ai<fresh.attributes.length;ai++){live.setAttribute(fresh.attributes[ai].name,fresh.attributes[ai].value);}live.innerHTML=fresh.innerHTML;var el=findEl(selectors);if(el){var vis=clpVisTarget(el);clpClear();_el=el;_elVis=vis;vis.classList.add('clp-sel');if(label){_badge=makeBadge(label,'tl_article',_articleId,'',el);clpBadgePos(_badge,vis);}}}
+      window.parent.postMessage({version:1,type:'clp:refreshed',articleId:articleId},'*');
+    })
+    .catch(function(err){
+      if(err&&err.name==='AbortError'){return;}
+      _refreshAbort=null;
+      window.parent.postMessage({version:1,type:'clp:refreshed',articleId:articleId},'*');
+    });
 });
 // Hover: fuchsia dashed outline + badge for any article/CE on the page.
 // _hoverEl = data element (for exclusion check + mouseout boundary).
@@ -202,7 +483,7 @@ document.addEventListener('mouseover',function(e){
   var vis=clpVisTarget(el);
   _hoverEl=el;_hoverElVis=vis;
   vis.classList.add('clp-hover');
-  _hoverBadge=makeHoverBadge(lbl,table,id);
+  _hoverBadge=makeHoverBadge(lbl,table,id,getCeParentTable(el),el);
   clpBadgePos(_hoverBadge,vis);
 });
 // mouseout: _hoverEl (the data/container element) defines the boundary.
@@ -257,8 +538,9 @@ document.addEventListener('submit',function(e){
   }else{
     f.setAttribute('action',u.toString());
   }
-},true);
+ },true);
 })();</script>
 HTML;
+        return $html;
     }
 }
