@@ -7,11 +7,13 @@ namespace ThinkDigital\ContaoLivePreview\Controller;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\PageModel;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 use ThinkDigital\ContaoLivePreview\Service\LabelCleanerTrait;
 use ThinkDigital\ContaoLivePreview\Service\PreviewUrlResolverInterface;
+use ThinkDigital\ContaoLivePreview\Service\ResolvePreviewEvent;
 
 // Route is defined in config/routes.yaml and loaded via ContaoManager\Plugin (RoutingPluginInterface).
 // The #[Route] attribute is intentionally absent — Symfony does not auto-scan bundle controllers.
@@ -24,6 +26,7 @@ class PreviewResolverController extends AbstractController
         private readonly PreviewUrlResolverInterface $resolver,
         private readonly ContaoFramework $framework,
         private readonly \Symfony\Contracts\Translation\TranslatorInterface $translator,
+        private readonly EventDispatcherInterface $eventDispatcher,
     ) {
     }
 
@@ -66,7 +69,13 @@ class PreviewResolverController extends AbstractController
             ]);
         }
 
-        $pageData = $this->resolver->resolve($table, $id);
+        // clp:resolve event — escape hatch for dynamic resolution that depends
+        // on request state. A listener that calls setPageData() takes
+        // precedence over the resolver chain. See docs/EXTENDING.md.
+        $event = new ResolvePreviewEvent($table, $id);
+        $this->eventDispatcher->dispatch($event, ResolvePreviewEvent::NAME);
+
+        $pageData = $event->isResolved() ? $event->getPageData() : $this->resolver->resolve($table, $id);
 
         if (null === $pageData) {
             return $this->json(['error' => 'Page not found'], 404);
