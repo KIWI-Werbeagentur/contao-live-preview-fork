@@ -331,14 +331,12 @@ function _rectsOverlap(a,c){return !(a.right<=c.left||c.right<=a.left||a.bottom<
 // the same top-left corner whenever the article/group has no own padding. Push
 // the (secondary) article badge above the CE badge so both stay readable.
 function clpDeconflict(){
-  if(!_badge||!_badgeCe)return;
-  if(_rectsOverlap(_badge.getBoundingClientRect(),_badgeCe.getBoundingClientRect())){
-    _badge.style.top=((parseFloat(_badge.style.top)||0)-_badgeCe.offsetHeight)+'px';
-  }
+  _deconflictOne(_badge,_badgeCe);
 }
-function _deconflictOne(active,hover){
-  if(active&&hover&&_rectsOverlap(active.getBoundingClientRect(),hover.getBoundingClientRect())){
-    active.style.top=((parseFloat(active.style.top)||0)-hover.offsetHeight)+'px';
+function _deconflictOne(a,b){
+  if(!a||!b)return;
+  if(_rectsOverlap(a.getBoundingClientRect(),b.getBoundingClientRect())){
+    a.style.top=((parseFloat(b.style.top)||0)-b.offsetHeight)+'px';
   }
 }
 function clpDeconflictHover(){
