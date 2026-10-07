@@ -595,7 +595,6 @@ CLP_FE.on('clp:highlight',function(d){
 // current page URL. Preserves scroll position, posts clp:refreshed on completion.
 CLP_FE.on('clp:refresh',function(d){
   var articleId=d.articleId;var selectors=d.selectors||[];var label=d.label||'';
-  var scrollX=window.scrollX,scrollY=window.scrollY;
   if(_refreshAbort){_refreshAbort.abort();}
   _refreshAbort=('AbortController'in window)?new AbortController():null;
   var fetchOpts={credentials:'same-origin',cache:'no-store',headers:{'X-Requested-With':'XMLHttpRequest'}};
